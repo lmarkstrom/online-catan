@@ -1,14 +1,13 @@
-// server/services/gameService.js
 const store = require('../store/memoryStore');
 const { v4: uuidv4 } = require('uuid'); // Run: npm install uuid
 
 const GameService = {
   
   createGame: (hostName, hostId) => {
-    // 1. Generate a short unique Room ID (e.g., "a1b2")
+    // Generate a short unique Room ID (e.g., "a1b2")
     const roomId = uuidv4().slice(0, 4).toUpperCase();
     
-    // 2. Initialize the Game State Skeleton
+    // Initialize the Game State Skeleton
     const newGame = {
       id: roomId,
       hostId: hostId,
@@ -27,23 +26,30 @@ const GameService = {
       logs: [`Game created by ${hostName}`]
     };
 
-    // 3. Save to Store
+    // Save to Store
     store.saveGame(roomId, newGame);
     return newGame;
   },
 
   joinGame: (roomId, playerName, playerId) => {
-    // 1. Check if game exists
+    // Check if game exists
     const game = store.getGame(roomId);
     if (!game) throw new Error("Room not found");
 
-    // 2. Check if game is full (Max 4 for Catan)
+    const existingPlayer = game.players.find(p => p.id === playerId);
+    
+    if (existingPlayer) {
+        // If they are already in, just return the game state without adding them again
+        return game;
+    }
+
+    // Check if game is full (Max 4 for Catan)
     if (game.players.length >= 4) throw new Error("Room is full");
 
-    // 3. Check if already started
+    // Check if already started
     if (game.status !== 'WAITING') throw new Error("Game already in progress");
 
-    // 4. Add Player
+    // Add Player
     const newPlayer = {
       id: playerId,
       name: playerName,
@@ -54,7 +60,7 @@ const GameService = {
     game.players.push(newPlayer);
     game.logs.push(`${playerName} joined the lobby`);
 
-    // 5. Save Update
+    // Save Update
     store.saveGame(roomId, game);
     return game;
   },

@@ -5,8 +5,12 @@ export interface UserData {
   uid: string;
   email: string;
   displayName: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: any;
+  updatedAt: any;
+  stats: {
+    wins: number;
+    gamesPlayed: number;
+  };
 }
 
 /**
@@ -23,10 +27,14 @@ export const createUserDocument = async (
     displayName,
     createdAt: new Date(),
     updatedAt: new Date(),
+    stats: {
+      wins: 0,
+      gamesPlayed: 0
+    }
   };
 
   try {
-    await setDoc(doc(db, "users", uid), userData);
+    await setDoc(doc(db, "users", uid), userData, { merge: true });
     return userData;
   } catch (error) {
     console.error("Error creating user document:", error);
@@ -41,7 +49,13 @@ export const getUserDocument = async (uid: string): Promise<UserData | null> => 
   try {
     const userDoc = await getDoc(doc(db, "users", uid));
     if (userDoc.exists()) {
-      return userDoc.data() as UserData;
+      const data = userDoc.data();
+      
+      return {
+        ...data,
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt,
+        updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : data.updatedAt,
+      } as UserData;
     }
     return null;
   } catch (error) {
