@@ -1,49 +1,46 @@
+// server/controllers/gameController.js
 const GameService = require('../services/gameService');
 
 module.exports = (io, socket) => {
   
-  // --- EVENT: CREATE LOBBY ---
+  // --- HANDLER: Create Lobby ---
   const createLobby = ({ name }) => {
     try {
+      // 1. Call Service
       const game = GameService.createGame(name, socket.id);
       
+      // 2. Join the Socket Room (Socket.io feature)
       socket.join(game.id);
+      
+      // 3. Reply to Client
       socket.emit("lobby_created", game);
-      console.log(`Game created: ${game.id} by ${name}`);
+      console.log(`[CREATE] Game ${game.id} created by ${name}`);
+      
     } catch (err) {
       socket.emit("error", { message: err.message });
     }
   };
 
-  // --- EVENT: JOIN LOBBY ---
+  // --- HANDLER: Join Lobby ---
   const joinLobby = ({ roomId, name }) => {
     try {
+      // 1. Call Service
       const game = GameService.joinGame(roomId, name, socket.id);
       
+      // 2. Join the Socket Room
       socket.join(roomId);
-      // Notify everyone in the room (including sender)
-      io.to(roomId).emit("game_updated", game);
-      console.log(`${name} joined ${roomId}`);
-    } catch (err) {
-      socket.emit("error", { message: err.message });
-    }
-  };
-
-  // --- EVENT: BUILD ROAD ---
-  const buildRoad = ({ roomId, coords }) => {
-    try {
-      const updatedGame = GameService.buildRoad(roomId, socket.id, coords);
       
-      // Broadcast new board state to everyone
-      io.to(roomId).emit("game_updated", updatedGame);
+      // 3. Broadcast to EVERYONE in that room (including sender)
+      io.to(roomId).emit("game_updated", game); // Everyone updates their list
+      
+      console.log(`[JOIN] ${name} joined ${roomId}`);
+
     } catch (err) {
-      // Only tell the user who failed
       socket.emit("error", { message: err.message });
     }
   };
 
-  // --- MAPPING EVENTS ---
+  // --- LISTENERS ---
   socket.on("create_lobby", createLobby);
   socket.on("join_lobby", joinLobby);
-  socket.on("build_road", buildRoad);
 };

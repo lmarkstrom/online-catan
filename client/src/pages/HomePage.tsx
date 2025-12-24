@@ -1,174 +1,144 @@
-import { useState, useEffect } from "react";
-import { signInWithPopup } from "firebase/auth";
-import { auth, googleProvider } from "@/lib/firebase";
-import { socket } from "@/lib/sockets";
-import { useNavigate } from "react-router-dom";
-import {
-  Container,
-  Box,
-  Button,
-  TextField,
-  Typography,
-  Paper,
-  Stack,
-} from "@mui/material";
+import { useState, useEffect } from "react"; // Added useEffect
+import { useNavigate } from "react-router-dom"; // Added useNavigate
+import { auth } from "@/lib/firebase"; // Import auth to check state
+import { Box, Button, Typography, Paper, Container } from "@mui/material";
+import { Hexagon } from "@mui/icons-material";
+import LoginModal from "@/components/LoginModal";
 
 export default function HomePage() {
-  const [user, setUser] = useState(null);
-  const [roomIdInput, setRoomIdInput] = useState("");
-  const navigate = useNavigate();
+  const [modalOpen, setModalOpen] = useState(false);
+  const navigate = useNavigate(); // Hook for navigation
 
-  // 1. Listen for Auth Changes
+  // 1. Auto-redirect if already logged in
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((u) => {
       if (u) {
-        setUser(u);
-        // Connect to Game Server once logged in
-        socket.auth = { username: u.displayName, userId: u.uid };
-        socket.connect();
+        navigate("/user");
       }
     });
     return () => unsubscribe();
-  }, []);
-
-  // 2. Event Listeners for Game Creation
-  useEffect(() => {
-    // When server says "lobby_created", move to that page
-    socket.on("lobby_created", (game) => {
-      navigate(`/lobby/${game.id}`);
-    });
-
-    return () => {
-      socket.off("lobby_created");
-    };
   }, [navigate]);
 
-  // --- ACTIONS ---
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      console.error("Login failed", err);
-    }
+  // 2. Handle Login Success
+  const handleLoginSuccess = () => {
+    setModalOpen(false);
+    navigate("/user"); // FIX: Actually move to the dashboard!
   };
-
-  const createGame = () => {
-    if (!user) return alert("Login first!");
-    socket.emit("create_lobby", { name: user.displayName });
-  };
-
-  const joinGame = () => {
-    if (!user) return alert("Login first!");
-    if (!roomIdInput) return alert("Enter a Room ID");
-    navigate(`/lobby/${roomIdInput}`);
-  };
-
-  // --- RENDER ---
-  if (!user) {
-    return (
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100vh",
-          background: "linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)",
-        }}
-      >
-        <Typography
-          variant="h2"
-          sx={{
-            fontWeight: "bold",
-            color: "#ff9800",
-            marginBottom: 4,
-            textShadow: "2px 2px 4px rgba(0,0,0,0.3)",
-          }}
-        >
-          CATAN ONLINE
-        </Typography>
-        <Button
-          onClick={handleLogin}
-          variant="contained"
-          size="large"
-          sx={{
-            backgroundColor: "#fff",
-            color: "#1e3c72",
-            padding: "12px 32px",
-            fontSize: "1.1rem",
-            fontWeight: "bold",
-            "&:hover": {
-              backgroundColor: "#f5f5f5",
-            },
-          }}
-        >
-          Sign in with Google
-        </Button>
-      </Box>
-    );
-  }
 
   return (
     <Box
       sx={{
+        minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        height: "100vh",
-        backgroundColor: "#f5f5f5",
+        // Consistent warm/cool gradient matching the HomePage
+        background: "linear-gradient(135deg, #fff1eb 0%, #ace0f9 100%)",
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      <Container maxWidth="sm">
+      {/* Decorative Background Elements (Optional subtle hexes) */}
+      <Hexagon 
+        sx={{ 
+            position: 'absolute', top: '10%', left: '5%', 
+            fontSize: 300, color: 'rgba(255,255,255,0.4)', transform: 'rotate(15deg)' 
+        }} 
+      />
+      <Hexagon 
+        sx={{ 
+            position: 'absolute', bottom: '-5%', right: '-5%', 
+            fontSize: 400, color: 'rgba(255,255,255,0.4)', transform: 'rotate(-15deg)' 
+        }} 
+      />
+
+      <Container maxWidth="xs" sx={{ position: 'relative', zIndex: 2 }}>
         <Paper
-          elevation={6}
+          elevation={12}
           sx={{
-            padding: 4,
+            padding: 6,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            borderRadius: 4,
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+            backdropFilter: "blur(10px)",
             textAlign: "center",
-            borderRadius: 2,
           }}
         >
-          <Typography variant="h4" sx={{ fontWeight: "bold", marginBottom: 3 }}>
-            Welcome, {user.displayName}
+          {/* Logo / Icon Area */}
+          <Box
+            sx={{
+              width: 80,
+              height: 80,
+              backgroundColor: "#ea580c",
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 3,
+              boxShadow: "0 8px 16px rgba(234, 88, 12, 0.3)",
+            }}
+          >
+            <Hexagon sx={{ fontSize: 50, color: "white" }} />
+          </Box>
+
+          <Typography
+            variant="h3"
+            sx={{
+              fontWeight: 800,
+              background: "linear-gradient(45deg, #c2410c 30%, #ea580c 90%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              letterSpacing: "-1px",
+              mb: 1,
+            }}
+          >
+            CATAN ONLINE
+          </Typography>
+
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 5 }}>
+            Trade, Build, Settle. <br /> Play with friends instantly.
           </Typography>
 
           <Button
-            onClick={createGame}
+            onClick={() => setModalOpen(true)}
             variant="contained"
-            fullWidth
             size="large"
+            fullWidth
             sx={{
-              backgroundColor: "#ff9800",
-              marginBottom: 3,
+              py: 2,
+              fontSize: "1.1rem",
+              fontWeight: "bold",
+              borderRadius: 2,
+              textTransform: "none",
+              backgroundColor: "#1e293b", // Dark Slate Blue for contrast
+              boxShadow: "0 8px 20px rgba(30, 41, 59, 0.3)",
               "&:hover": {
-                backgroundColor: "#f57c00",
+                backgroundColor: "#0f172a",
+                transform: "translateY(-2px)",
+                boxShadow: "0 10px 25px rgba(30, 41, 59, 0.4)",
               },
+              transition: "all 0.3s ease",
             }}
           >
-            Create New Game
+            Sign In
           </Button>
 
-          <Stack direction="row" spacing={1}>
-            <TextField
-              placeholder="Room ID"
-              variant="outlined"
-              value={roomIdInput}
-              onChange={(e) => setRoomIdInput(e.target.value)}
-              fullWidth
-              size="small"
-            />
-            <Button
-              onClick={joinGame}
-              variant="contained"
-              sx={{
-                backgroundColor: "#1e3c72",
-              }}
-            >
-              Join
-            </Button>
-          </Stack>
+          <Typography variant="caption" sx={{ mt: 4, color: "#94a3b8" }}>
+            v1.0 • Catan online
+            <br />
+            © 2025 Linus Markström
+          </Typography>
         </Paper>
       </Container>
+
+      <LoginModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+      />
     </Box>
   );
 }

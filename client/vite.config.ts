@@ -3,7 +3,21 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "coop-headers",
+      configureServer(server) {
+        return () => {
+          server.middlewares.use((_req, res, next) => {
+            res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+            res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
+            next();
+          });
+        };
+      },
+    },
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

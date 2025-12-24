@@ -1,6 +1,7 @@
 // server/server.js
 require('dotenv').config(); // <--- MUST BE THE FIRST LINE
 
+const registerGameHandlers = require('./controllers/gameController');
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
@@ -18,6 +19,17 @@ const io = new Server(server, {
     origin: process.env.CLIENT_URL, // <--- Allow only this URL to connect
     methods: ["GET", "POST"]
   }
+});
+
+io.on('connection', (socket) => {
+  console.log(`User Connected: ${socket.id}`);
+
+  // --- ACTIVATE CONTROLLERS ---
+  registerGameHandlers(io, socket);
+
+  socket.on('disconnect', () => {
+    console.log('User Disconnected:', socket.id);
+  });
 });
 
 const PORT = process.env.PORT || 3001;
