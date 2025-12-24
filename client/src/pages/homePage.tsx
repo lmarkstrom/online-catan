@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
-import { socket } from "@/lib/sockets";
+import { socket } from "@/lib/socket";
 import { useRouter } from "next/navigation";
 
 export default function LandingPage() {
