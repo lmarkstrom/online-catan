@@ -59,6 +59,30 @@ const GameService = {
     return game;
   },
 
+  startGame: (roomId, requesterId) => {
+    const game = store.getGame(roomId);
+    
+    // Validations
+    if (!game) throw new Error("Game not found");
+    if (game.hostId !== requesterId) throw new Error("Only the host can start the game");
+    if (game.status !== 'WAITING') throw new Error("Game already started");
+    
+    // Note: Usually you check for min 2 players, but for testing alone, you might skip this
+    // if (game.players.length < 2) throw new Error("Need at least 2 players"); 
+
+    // Update Status
+    game.status = 'PLAYING';
+    
+    // Initialize Game Logic
+    game.currentTurn = game.players[0].id; // First player starts
+    game.phase = "ROLL_DICE"; // Game phases: ROLL_DICE, TRADING, BUILDING
+    game.diceResult = null; // Reset dice
+
+    // Save and Return
+    store.saveGame(roomId, game);
+    return game;
+  },
+
   getGame: (roomId) => {
     return store.getGame(roomId);
   }

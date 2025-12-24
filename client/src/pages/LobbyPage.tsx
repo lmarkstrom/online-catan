@@ -1,161 +1,242 @@
 import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { socket } from "@/lib/sockets";
-import { useNavigate, useParams } from "react-router-dom";
 import { auth } from "@/lib/firebase";
 import {
-  Container,
   Box,
-  Typography,
+  Container,
   Paper,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-  Button,
+  Typography,
+  Grid,
+  Avatar,
   Chip,
+  Button,
   CircularProgress,
-  Alert,
+  Divider,
+  Alert
 } from "@mui/material";
-import { Person, Star } from "@mui/icons-material";
+import { ContentCopy, EmojiEvents, SportsEsports } from "@mui/icons-material";
 
 export default function LobbyPage() {
+  const { id } = useParams(); // Get Room ID from URL
+  const navigate = useNavigate();
+  
   const [game, setGame] = useState(null);
   const [error, setError] = useState("");
-  const navigate = useNavigate();
-  const { id: roomId } = useParams();
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    // 1. Ensure Socket is Connected (in case of page refresh)
+    // Connection Safety Check
+    if (!auth.currentUser) {
+        navigate("/");
+        return;
+    }
+    
     if (!socket.connected) {
-      socket.connect();
+        socket.auth = { 
+            username: auth.currentUser.displayName, 
+            userId: auth.currentUser.uid 
+        };
+        socket.connect();
     }
+      
+    socket.on("game_updated", (gameState) => {
+        setGame(gameState);
+        
+        // ADD THIS:
+        if (gameState.status === "PLAYING") {
+            navigate(`/game/${gameState.id}`);
+        }
+    });
 
-    // 2. Join the Room logic
-    const user = auth.currentUser;
-    if (user && roomId) {
-      // Emit "join_lobby" immediately when this page loads
-      socket.emit("join_lobby", { roomId, name: user.displayName });
-    }
+    // Emit Join Event
+    // We emit this every time we load the page to ensure we are subscribed to the room updates
+    socket.emit("join_lobby", { 
+        roomId: id, 
+        name: auth.currentUser.displayName 
+    });
 
-    // 3. Listen for Updates
-    socket.on("game_updated", (updatedGame) => {
-      setGame(updatedGame);
+    // Socket Listeners
+    socket.on("game_updated", (gameState) => {
+      setGame(gameState);
+
+      // *** ADD THIS BLOCK ***
+      if (gameState.status === 'PLAYING') {
+        navigate(`/game/${gameState.id}`);
+      }
+      // **********************
+      
+      setLoading(false);
+      setError("");
     });
 
     socket.on("error", (err) => {
       setError(err.message);
+      setLoading(false);
     });
 
+    // Cleanup
     return () => {
       socket.off("game_updated");
       socket.off("error");
     };
-  }, [roomId]);
+  }, [id, navigate]);
+    
+  const handleStartGame = () => {
+        socket.emit("start_game", { roomId: id });
+    };
 
-  const startGame = () => {
-    alert("Start Game logic goes here! (Next Step)");
+  const copyRoomId = () => {
+    navigator.clipboard.writeText(id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  if (error) {
-    return (
-      <Container maxWidth="md" sx={{ padding: 4 }}>
-        <Alert severity="error">Error: {error}</Alert>
-      </Container>
-    );
-  }
+  // --- RENDER STATES ---
 
-  if (!game) {
+  if (loading) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100vh",
-        }}
-      >
+      <Box sx={{ height: "100vh", display: "flex", justifyContent: "center", alignItems: "center" }}>
         <CircularProgress />
       </Box>
     );
   }
 
-  return (
-    <Container maxWidth="md" sx={{ padding: 4 }}>
-      <Box sx={{ marginBottom: 4 }}>
-        <Typography variant="h3" sx={{ fontWeight: "bold", marginBottom: 1 }}>
-          Lobby: <Typography component="span" sx={{ color: "#ff9800" }}>{roomId}</Typography>
-        </Typography>
-        <Typography variant="body1" color="textSecondary">
-          Share this Code with friends to play.
-        </Typography>
-      </Box>
+  if (error) {
+    return (
+      <Container maxWidth="sm" sx={{ mt: 10 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
+        <Button variant="contained" onClick={() => navigate("/user")}>Go Back</Button>
+      </Container>
+    );
+  }
 
-      <Paper elevation={3} sx={{ padding: 3, marginBottom: 4 }}>
-        <Box sx={{ display: "flex", alignItems: "center", marginBottom: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: "bold", flex: 1 }}>
-            Players ({game.players.length}/4)
-          </Typography>
-          <Chip label={`${game.players.length}/4`} color="primary" />
+  return (
+    <Box sx={{ minHeight: "100vh", bgcolor: "#f5f7fa", p: 4 }}>
+      <Container maxWidth="lg">
+        
+        {/* HEADER */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+            <Typography variant="h4" fontWeight="bold" sx={{ color: '#1e293b' }}>
+                <SportsEsports sx={{ mr: 2, verticalAlign: 'bottom' }} />
+                Lobby: {id}
+            </Typography>
+            <Button 
+                variant="outlined" 
+                startIcon={<ContentCopy />} 
+                onClick={copyRoomId}
+            >
+                {copied ? "Copied!" : "Copy Room ID"}
+            </Button>
         </Box>
 
-        <List>
-          {game.players.map((player, index) => (
-            <ListItem
-              key={player.id}
-              sx={{
-                backgroundColor: index % 2 === 0 ? "#f5f5f5" : "transparent",
-                borderRadius: 1,
-                marginBottom: 1,
-              }}
-            >
-              <ListItemIcon>
-                <Box
-                  sx={{
-                    width: 16,
-                    height: 16,
-                    borderRadius: "50%",
-                    backgroundColor: player.color || "#999",
-                  }}
-                />
-              </ListItemIcon>
-              <ListItemText
-                primary={player.name}
-                secondary={
-                  <Chip
-                    label="Ready"
-                    size="small"
-                    color="success"
-                    variant="outlined"
-                    sx={{ marginTop: 0.5 }}
-                  />
-                }
-              />
-              {player.id === game.players[0].id && (
-                <Chip icon={<Star />} label="Host" variant="filled" color="warning" />
-              )}
-            </ListItem>
-          ))}
-        </List>
-      </Paper>
+        <Grid container spacing={4}>
+            {/* LEFT COLUMN: PLAYER LIST */}
+            <Grid item xs={12} md={4}>
+                <Paper elevation={3} sx={{ p: 3, borderRadius: 2 }}>
+                    <Typography variant="h6" fontWeight="bold" gutterBottom>
+                        Players ({game.players.length}/4)
+                    </Typography>
+                          <Divider sx={{ mb: 2 }} />
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {game.players.map((player) => (
+                            <Box 
+                                key={player.id} 
+                                sx={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    p: 1.5, 
+                                    bgcolor: player.id === auth.currentUser?.uid ? '#eff6ff' : 'transparent',
+                                    borderRadius: 1
+                                }}
+                            >
+                                <Avatar sx={{ bgcolor: player.color, mr: 2 }}>
+                                    {/* Fallback to "?" if name is missing */}
+                                    {(player.name || "?").charAt(0).toUpperCase()}
+                                </Avatar>
+                                <Box sx={{ flexGrow: 1 }}>
+                                    <Typography variant="subtitle2" fontWeight="bold">
+                                        {/* Fallback to "Unknown Player" */}
+                                        {player.name || "Unknown Player"} {player.id === auth.currentUser?.uid && "(You)"}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        {player.ready ? "Ready" : "Not Ready"}
+                                    </Typography>
+                                </Box>
+                                {player.id === game.hostId && (
+                                    <EmojiEvents sx={{ color: '#fbbf24' }} />
+                                )}
+                                {game.hostId === auth.currentUser?.uid ? (
+                                    <Box sx={{ mt: 4, textAlign: 'center' }}>
+                                        <Button 
+                                        variant="contained" 
+                                        color="success" 
+                                        size="large"
+                                        onClick={handleStartGame}
+                                        sx={{ 
+                                            py: 2, 
+                                            px: 6, 
+                                            fontSize: '1.2rem', 
+                                            fontWeight: 'bold',
+                                            boxShadow: '0 4px 14px rgba(0,0,0,0.2)' 
+                                        }}
+                                        >
+                                        Start Game
+                                        </Button>
+                                    </Box>
+                                    ) : (
+                                    <Box sx={{ mt: 4, textAlign: 'center' }}>
+                                        <Typography variant="body1" color="text.secondary">
+                                        Waiting for host to start...
+                                        </Typography>
+                                    </Box>
+                                    )}
+                            </Box>
+                        ))}
+                    </Box>
+                </Paper>
+            </Grid>
 
-      <Button
-        onClick={startGame}
-        disabled={game.players.length < 2}
-        variant="contained"
-        fullWidth
-        size="large"
-        sx={{
-          backgroundColor: game.players.length < 2 ? "#ccc" : "#4caf50",
-          padding: 2,
-          fontSize: "1.1rem",
-          fontWeight: "bold",
-          "&:hover": {
-            backgroundColor: game.players.length < 2 ? "#ccc" : "#388e3c",
-          },
-        }}
-      >
-        {game.players.length < 2 ? "Waiting for players..." : "START GAME"}
-      </Button>
-    </Container>
+            {/* RIGHT COLUMN: GAME AREA (PLACEHOLDER) */}
+            <Grid item xs={12} md={8}>
+                <Paper 
+                    elevation={3} 
+                    sx={{ 
+                        p: 0, 
+                        borderRadius: 2, 
+                        height: '500px', 
+                        bgcolor: '#3b82f6',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'white',
+                        flexDirection: 'column'
+                    }}
+                >
+                    <Typography variant="h4" sx={{ opacity: 0.5 }}>
+                        Game Board Area
+                    </Typography>
+                    <Typography variant="body1" sx={{ opacity: 0.5 }}>
+                        (Hex Grid will render here)
+                    </Typography>
+                    
+                    <Box sx={{ mt: 4 }}>
+                         <Chip label={`Status: ${game.status}`} color={game.status === 'WAITING' ? 'success' : 'default'} />
+                    </Box>
+                </Paper>
+            </Grid>
+        </Grid>
+
+        {/* DEBUG SECTION (REMOVE LATER) */}
+        <Box sx={{ mt: 5 }}>
+            <Typography variant="caption" color="text.secondary">DEVELOPER DEBUG VIEW:</Typography>
+            <Paper sx={{ p: 2, bgcolor: '#1e1e1e', color: '#00ff00', overflowX: 'auto' }}>
+                <pre>{JSON.stringify(game, null, 2)}</pre>
+            </Paper>
+        </Box>
+
+      </Container>
+    </Box>
   );
 }
