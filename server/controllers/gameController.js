@@ -1,61 +1,97 @@
-// server/controllers/gameController.js
 const GameService = require('../services/gameService');
 
 module.exports = (io, socket) => {
   
-  // --- HANDLER: Create Lobby ---
-  const createLobby = ({ name }) => {
+  // 1. Create Lobby
+  const createLobby = ({ name, uid }) => {
     try {
-      // 1. Call Service
-      const game = GameService.createGame(name, socket.id);
+      const hostId = uid || socket.id;
+      const hostName = name || "Unknown";
+
+      if (!uid) console.warn("WARNING: Creating game without UID. Using Socket ID.");
+
+      const game = GameService.createGame(hostName, hostId);
       
-      // 2. Join the Socket Room (Socket.io feature)
       socket.join(game.id);
-      
-      // 3. Reply to Client
       socket.emit("lobby_created", game);
-      console.log(`[CREATE] Game ${game.id} created by ${name}`);
+      console.log(`[CREATE] Game ${game.id} created by ${hostName} (${hostId})`);
       
     } catch (err) {
       socket.emit("error", { message: err.message });
     }
   };
 
-  const startGame = ({ roomId }) => {
+  // 2. Join Lobby
+  const joinLobby = ({ roomId, name, uid }) => {
     try {
-      // Call Service to change state
-      const updatedGame = GameService.startGame(roomId, socket.id);
+      const playerId = uid || socket.id;
+      const playerName = name || "Unknown";
       
-      // Notify everyone in the room (including sender)
-      io.to(roomId).emit("game_updated", updatedGame);
-      console.log(`[START] Game ${roomId} started!`);
-
-    } catch (err) {
-      socket.emit("error", { message: err.message });
-    }
-  };
-
-  // --- HANDLER: Join Lobby ---
-  const joinLobby = ({ roomId, name }) => {
-    try {
-      // Call Service
-      const game = GameService.joinGame(roomId, name, socket.id);
+      // Get the object from service
+      const result = GameService.joinGame(roomId, playerName, playerId);
       
-      // Join the Socket Room
+      // Handle the new return format
+      const game = result.game || result; 
+      const isNew = result.isNew;
+
       socket.join(roomId);
-      
-      // Broadcast to EVERYONE in that room (including sender)
-      io.to(roomId).emit("game_updated", game); // Everyone updates their list
-      
-      console.log(`[JOIN] ${name} joined ${roomId}`);
+      io.to(roomId).emit("game_updated", game);
+
+      if (isNew) {
+        console.log(`[JOIN] ${playerName} (${playerId}) joined ${roomId}`);
+      } else {
+        // Silence re-joins
+      }
 
     } catch (err) {
       socket.emit("error", { message: err.message });
     }
   };
 
-  // --- LISTENERS ---
+  // 3. Game Actions (Start, Place, Roll, End)
+  const startGame = ({ roomId, uid }) => {
+    try {
+      const updatedGame = GameService.startGame(roomId, uid);
+      io.to(roomId).emit("game_updated", updatedGame);
+    } catch (err) {
+      socket.emit("error", { message: err.message });
+    }
+  };
+
+  const placeStructure = ({ roomId, uid, type, location }) => {
+    try {
+      console.log(`[BUILD] Player ${uid} trying to build ${type} at ${location}`);
+      const updatedGame = GameService.placeStructure(roomId, uid, type, location);
+      io.to(roomId).emit("game_updated", updatedGame);
+    } catch (err) {
+       console.error(`[BUILD ERROR] ${err.message}`);
+       socket.emit("error", { message: err.message });
+    }
+  };
+
+  const rollDice = ({ roomId, uid }) => {
+    try {
+      const updatedGame = GameService.rollDice(roomId, uid);
+      io.to(roomId).emit("game_updated", updatedGame);
+    } catch (err) {
+       socket.emit("error", { message: err.message });
+    }
+  };
+
+  const endTurn = ({ roomId, uid }) => {
+    try {
+      const updatedGame = GameService.endTurn(roomId, uid);
+      io.to(roomId).emit("game_updated", updatedGame);
+    } catch (err) {
+       socket.emit("error", { message: err.message });
+    }
+  };
+
+  // Register Listeners
   socket.on("create_lobby", createLobby);
   socket.on("join_lobby", joinLobby);
   socket.on("start_game", startGame);
+  socket.on("place_structure", placeStructure); 
+  socket.on("roll_dice", rollDice);             
+  socket.on("end_turn", endTurn);               
 };
