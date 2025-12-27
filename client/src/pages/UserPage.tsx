@@ -49,7 +49,7 @@ export default function UserPage() {
     return () => unsubscribe();
   }, [navigate]);
 
-  // LISTEN FOR LOBBY CREATION (THIS WAS MISSING)
+  // LISTEN FOR LOBBY CREATION 
   useEffect(() => {
     function onLobbyCreated(game) {
       navigate(`/lobby/${game.id}`);
@@ -65,16 +65,15 @@ export default function UserPage() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      socket.disconnect(); // Good practice to disconnect on logout
+      socket.disconnect();
       navigate("/");
     } catch (err) { console.error(err); }
   };
 
   const createGame = () => {
     if (!user) return;
-    // Use the name from DB, fallback to Auth name, fallback to "Unknown"
     const hostName = dbUser?.displayName || user.displayName || "Unknown";
-    socket.emit("create_lobby", { name: hostName });
+    socket.emit("create_lobby", { name: hostName, uid: user.uid });
   };
 
   const joinGame = () => {

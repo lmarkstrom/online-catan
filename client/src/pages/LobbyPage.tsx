@@ -40,12 +40,13 @@ export default function LobbyPage() {
     // Join Room
     socket.emit("join_lobby", { 
         roomId: id, 
-        name: auth.currentUser.displayName 
+        name: auth.currentUser.displayName,
+        uid: auth.currentUser.uid
     });
 
     // Listen for Updates
     socket.on("game_updated", (gameState) => {
-      setGame(gameState);
+        setGame(gameState);
       if (gameState.status === 'PLAYING') {
         navigate(`/game/${gameState.id}`);
       }
@@ -65,7 +66,7 @@ export default function LobbyPage() {
   }, [id, navigate]);
     
   const handleStartGame = () => {
-        socket.emit("start_game", { roomId: id });
+        socket.emit("start_game", { roomId: id, uid: auth.currentUser.uid } );
     };
 
   const copyRoomId = () => {
