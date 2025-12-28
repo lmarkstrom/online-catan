@@ -8,6 +8,7 @@ import { Box, CircularProgress, Typography } from "@mui/material";
 import GameBoard from "@/components/GameBoard";
 import Header from "@/components/game/Header";
 import Hud from "@/components/game/Hud";
+import type { BuildType } from "@/util/types";
 
 export default function GamePage() {
   const { id } = useParams();
@@ -17,6 +18,7 @@ export default function GamePage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(true);
+  const [buildType, setBuildType] = useState<BuildType>("settlement");
 
   // 1. Wait for Auth AND Fetch DB Data
   useEffect(() => {
@@ -85,10 +87,14 @@ export default function GamePage() {
               pointerEvents: "none" // <--- CRITICAL ADDITION
           }} />
           <Box sx={{ position: "relative", zIndex: 1, width: "100%", height: "100%" }}>
-              <GameBoard game={game} />
+              <GameBoard game={game} buildType={buildType} />
           </Box>
       </Box>
-      <Hud game={game} />
+      <Hud 
+        game={game} 
+        buildType={buildType} 
+        onChangeBuildType={(next) => setBuildType(next)} 
+      />
     </Box>
   );
 }

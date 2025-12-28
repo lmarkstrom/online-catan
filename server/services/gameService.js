@@ -1,6 +1,95 @@
 const store = require('../store/memoryStore');
-const { generateBoard, doesBuildingTouchHex } = require('../utils/boardUtils');
+const {
+  generateBoard,
+  doesBuildingTouchHex,
+  isRoadConnectedToSettlement,
+  roadTouchesVertex,
+  doRoadsConnect,
+  areSameVertex,
+  areAdjacentVertices,
+  areSameRoad
+} = require('../utils/boardUtils');
 const { v4: uuidv4 } = require('uuid');
+
+const RESOURCE_TYPES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
+const BUILD_COSTS = {
+  road: { wood: 1, brick: 1 },
+  settlement: { wood: 1, brick: 1, sheep: 1, wheat: 1 },
+  city: { wheat: 2, ore: 3 }
+};
+
+const normalizePlayerResources = (player) => {
+  if (!player.resources) player.resources = {};
+  RESOURCE_TYPES.forEach((res) => {
+    if (typeof player.resources[res] !== 'number') {
+      player.resources[res] = 0;
+    }
+  });
+};
+
+const hasResources = (player, cost) => {
+  return Object.entries(cost).every(([res, amount]) => (player.resources[res] || 0) >= amount);
+};
+
+const deductResources = (player, cost) => {
+  Object.entries(cost).forEach(([res, amount]) => {
+    player.resources[res] -= amount;
+  });
+};
+
+const validateSettlementPlacement = (game, uid, location, isSetupPhase) => {
+  const buildings = game.board.buildings || {};
+
+  for (const [locKey, building] of Object.entries(buildings)) {
+    if (building.type === 'road') continue;
+    if (areSameVertex(locKey, location)) {
+      throw new Error('Intersection already occupied.');
+    }
+    if (areAdjacentVertices(locKey, location)) {
+      throw new Error('Settlements must be at least two edges apart.');
+    }
+  }
+
+  if (!isSetupPhase) {
+    const hasFriendlyRoad = Object.entries(buildings).some(([locKey, building]) =>
+      building.type === 'road' && building.owner === uid && roadTouchesVertex(locKey, location)
+    );
+
+    if (!hasFriendlyRoad) {
+      throw new Error('Settlements must connect to your road network.');
+    }
+  }
+};
+
+const validateRoadPlacement = (game, uid, location) => {
+  const buildings = game.board.buildings || {};
+
+  const duplicateRoad = Object.entries(buildings).some(([locKey, building]) =>
+    building.type === 'road' && areSameRoad(locKey, location)
+  );
+  if (duplicateRoad) {
+    throw new Error('A road already exists on that edge.');
+  }
+
+  const touchesFriendlyStructure = Object.entries(buildings).some(([locKey, building]) =>
+    building.owner === uid && building.type !== 'road' && roadTouchesVertex(location, locKey)
+  );
+
+  const touchesFriendlyRoad = Object.entries(buildings).some(([locKey, building]) =>
+    building.owner === uid && building.type === 'road' && doRoadsConnect(location, locKey)
+  );
+
+  if (!touchesFriendlyStructure && !touchesFriendlyRoad) {
+    throw new Error('Roads must connect to your existing network.');
+  }
+};
+
+const validateCityUpgrade = (game, uid, location) => {
+  const existing = game.board.buildings?.[location];
+  if (!existing || existing.owner !== uid || existing.type !== 'settlement') {
+    throw new Error('Cities can only upgrade your own settlements.');
+  }
+};
 
 const GameService = {
   createGame: (hostName, hostId) => {
@@ -70,7 +159,8 @@ const GameService = {
     game.phase = "SETUP"; 
     game.turnOrder = game.players.map(p => p.id); // e.g., [A, B, C, D]
     game.currentTurn = game.turnOrder[0];
-    game.setupTurnIndex = 0; // Counts 0 to (Players*2 - 1)
+    game.setupTurnIndex = 0; 
+    game.setupRequirement = { expect: "settlement", pendingSettlement: null };
 
     game.logs.push("Game Started! Setup Phase Begins.");
     store.saveGame(roomId, game);
@@ -79,23 +169,80 @@ const GameService = {
 
   placeStructure: (roomId, uid, type, location) => {
     const game = store.getGame(roomId);
-    if (game.currentTurn !== uid) throw new Error("Not your turn");
-
-    // 1. PHASE VALIDATION
-    if (game.phase === "ROLL_DICE") throw new Error("You must roll the dice first!");
-    if (game.board.buildings[location]) throw new Error("Spot occupied");
-
-    // 2. Add Building
-    game.board.buildings[location] = { type, owner: uid };
-    game.logs.push(`Player built a ${type}`);
-
-    // 3. SETUP PHASE: Auto-end turn
-    if (game.phase === "SETUP") {
-        return GameService.endTurn(roomId, uid);
+    if (!game) throw new Error("Game not found");
+    if (!game.board.buildings) {
+      game.board.buildings = {};
     }
-    
-    // In MAIN_TURN, we do NOT auto-end turn. 
-    // You would add resource cost deduction logic here later.
+
+    if (game.currentTurn !== uid) throw new Error("Not your turn");
+    if (game.phase === "ROLL_DICE") throw new Error("You must roll the dice first!");
+
+    const isSetupPhase = game.phase === "SETUP";
+    if (type !== "city" && game.board.buildings[location]) throw new Error("Spot occupied");
+    if (isSetupPhase && type === "city") throw new Error("Cities cannot be built during setup.");
+
+    if (isSetupPhase) {
+      game.setupRequirement = game.setupRequirement || { expect: "settlement", pendingSettlement: null };
+      const { expect, pendingSettlement } = game.setupRequirement;
+
+      if (expect === "settlement" && type !== "settlement") {
+        throw new Error("You must place a settlement before building a road in setup.");
+      }
+
+      if (expect === "road") {
+        if (type !== "road") {
+          throw new Error("You must place a road connected to your new settlement.");
+        }
+        if (!pendingSettlement || !isRoadConnectedToSettlement(location, pendingSettlement)) {
+          throw new Error("Road must touch the settlement you just placed.");
+        }
+      }
+    }
+
+    const player = game.players.find((p) => p.id === uid);
+    if (!player) throw new Error("Player not found in game");
+    normalizePlayerResources(player);
+
+    switch (type) {
+      case "settlement":
+        validateSettlementPlacement(game, uid, location, isSetupPhase);
+        break;
+      case "road":
+        validateRoadPlacement(game, uid, location);
+        break;
+      case "city":
+        validateCityUpgrade(game, uid, location);
+        break;
+      default:
+        throw new Error("Unknown structure type");
+    }
+
+    if (!isSetupPhase) {
+      const cost = BUILD_COSTS[type];
+      if (!cost) throw new Error(`No cost configured for ${type}`);
+      if (!hasResources(player, cost)) {
+        throw new Error(`Not enough resources to build a ${type}.`);
+      }
+      deductResources(player, cost);
+    }
+
+    game.board.buildings[location] = { type, owner: uid };
+    const logName = player.name || uid;
+    game.logs.push(`${logName} built a ${type}`);
+
+    if (isSetupPhase) {
+      if (type === "settlement") {
+        game.setupRequirement = { expect: "road", pendingSettlement: location };
+        store.saveGame(roomId, game);
+        return game;
+      }
+
+      if (type === "road") {
+        game.setupRequirement = { expect: "settlement", pendingSettlement: null };
+        store.saveGame(roomId, game);
+        return GameService.endTurn(roomId, uid);
+      }
+    }
 
     store.saveGame(roomId, game);
     return game;
@@ -112,35 +259,28 @@ const GameService = {
     game.diceResult = [d1, d2];
     game.logs.push(`${uid} rolled ${total}`);
 
-    // --- DISTRIBUTE RESOURCES ---
     if (total !== 7) {
-        // 1. Find all Hexes that match the dice roll
-        const activeHexes = Object.values(game.board.hexes).filter(
-            h => h.number === total && h.resource !== 'desert'
-        );
+      const activeHexes = Object.values(game.board.hexes).filter(
+        (h) => h.number === total && h.resource !== 'desert'
+      );
 
-        // 2. For each active Hex, find ANY building that touches it
-        activeHexes.forEach(hex => {
-            Object.entries(game.board.buildings).forEach(([locKey, building]) => {
-                
-                // Skip roads for now (they don't get resources)
-                if (building.type === 'road') return;
+      activeHexes.forEach((hex) => {
+        Object.entries(game.board.buildings).forEach(([locKey, building]) => {
+          if (building.type === 'road') return;
 
-                // USE THE NEW CHECK
-                if (doesBuildingTouchHex(hex, locKey)) {
-                    const player = game.players.find(p => p.id === building.owner);
-                    if (player) {
-                        const qty = building.type === 'city' ? 2 : 1;
-                        player.resources[hex.resource] += qty;
-                        
-                        game.logs.push(`${player.name} got ${qty} ${hex.resource}`);
-                    }
-                }
-            });
+          if (doesBuildingTouchHex(hex, locKey)) {
+            const player = game.players.find((p) => p.id === building.owner);
+            if (player) {
+              const qty = building.type === 'city' ? 2 : 1;
+              player.resources[hex.resource] += qty;
+              game.logs.push(`${player.name} got ${qty} ${hex.resource}`);
+            }
+          }
         });
+      });
     }
 
-    game.phase = "MAIN_TURN"; 
+    game.phase = "MAIN_TURN";
     store.saveGame(roomId, game);
     return game;
   },
@@ -161,6 +301,7 @@ const GameService = {
             game.turnIndex = 0;
             game.currentTurn = game.turnOrder[0];
             game.logs.push("Setup complete! First turn begins.");
+          game.setupRequirement = null;
         } else {
             // Calculate Next Player (Snake Draft)
             let playerIndex;
@@ -174,6 +315,7 @@ const GameService = {
             // Add a log so you know why it's your turn again
             const nextName = game.players.find(p => p.id === game.currentTurn).name;
             game.logs.push(`Setup Round: ${nextName} to place structure.`);
+          game.setupRequirement = { expect: "settlement", pendingSettlement: null };
         }
     } 
     else {
@@ -182,6 +324,7 @@ const GameService = {
         game.currentTurn = game.turnOrder[game.turnIndex];
         game.phase = "ROLL_DICE";
         game.diceResult = null;
+        game.setupRequirement = null;
     }
 
     store.saveGame(roomId, game);

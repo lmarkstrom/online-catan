@@ -15,18 +15,22 @@ import {
 } from "@mui/material";
 import { 
   Casino, 
-  CheckCircle, 
   Terrain, 
   Home, 
   Apartment, 
   SkipNext
 } from "@mui/icons-material";
 import { resourceColors } from "@/util/constants";
-import type { Props } from "@/util/types";
+import type { Props, BuildType } from "@/util/types";
 
-export default function Hud(props: Props) {
+type HudProps = Props & {
+  buildType: BuildType;
+  onChangeBuildType: (type: BuildType) => void;
+};
+
+export default function Hud(props: HudProps) {
   const { id } = useParams();
-  const { game } = props;
+  const { game, buildType, onChangeBuildType } = props;
 
   const handleRollDice = () => {
     socket.emit("roll_dice", { 
@@ -44,8 +48,19 @@ export default function Hud(props: Props) {
   // --- FIX END ---
 
   const isMyTurn = game.currentTurn === auth.currentUser?.uid;
+  const canBuild = isMyTurn && (game.phase === "SETUP" || game.phase === "MAIN_TURN");
   const me = game.players.find((p: any) => p.id === auth.currentUser?.uid) || {};
   const currentTurnPlayer = game.players.find((p: any) => p.id === game.currentTurn);
+  const buildOptions: Array<{ type: BuildType; label: string; icon: JSX.Element; activeColor: string; hoverBg: string }> = [
+    { type: "road", label: "Build Road", icon: <Terrain />, activeColor: "#38bdf8", hoverBg: "rgba(56, 189, 248, 0.15)" },
+    { type: "settlement", label: "Build Settlement", icon: <Home />, activeColor: "#4ade80", hoverBg: "rgba(74, 222, 128, 0.15)" },
+    { type: "city", label: "Build City", icon: <Apartment />, activeColor: "#facc15", hoverBg: "rgba(250, 204, 21, 0.15)" },
+  ];
+
+  const handleSelectBuild = (type: BuildType) => {
+    if (!canBuild) return;
+    onChangeBuildType(type);
+  };
 
   return (
     <Box sx={{ position: "relative", zIndex: 10 }}>
@@ -156,21 +171,32 @@ export default function Hud(props: Props) {
                     gap: 1 
                 }}
               >
-                <Tooltip title="Build Road">
-                  <IconButton sx={{ color: "#94a3b8", "&:hover": { color: "#38bdf8", bgcolor: "rgba(56, 189, 248, 0.1)" } }}>
-                    <Terrain />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Build Settlement">
-                  <IconButton sx={{ color: "#94a3b8", "&:hover": { color: "#4ade80", bgcolor: "rgba(74, 222, 128, 0.1)" } }}>
-                    <Home />
-                  </IconButton>
-                </Tooltip>
-                <Tooltip title="Build City">
-                  <IconButton sx={{ color: "#94a3b8", "&:hover": { color: "#facc15", bgcolor: "rgba(250, 204, 21, 0.1)" } }}>
-                    <Apartment />
-                  </IconButton>
-                </Tooltip>
+                {buildOptions.map((option) => {
+                  const isSelected = buildType === option.type;
+                  return (
+                    <Tooltip key={option.type} title={option.label}>
+                      <span>
+                        <IconButton
+                          aria-pressed={isSelected}
+                          disabled={!canBuild}
+                          onClick={() => handleSelectBuild(option.type)}
+                          sx={{
+                            color: isSelected ? option.activeColor : "#94a3b8",
+                            bgcolor: isSelected ? option.hoverBg : "transparent",
+                            transition: "all 0.2s",
+                            "&:hover": {
+                              color: option.activeColor,
+                              bgcolor: option.hoverBg,
+                            },
+                            opacity: canBuild ? 1 : 0.4,
+                          }}
+                        >
+                          {option.icon}
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  );
+                })}
               </Paper>
 
               <Stack direction="row" spacing={2}>

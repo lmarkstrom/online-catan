@@ -1,6 +1,7 @@
 import { Box } from "@mui/material";
 import { socket } from "@/lib/sockets";
 import { auth } from "@/lib/firebase";
+import type { BuildType, GameBoardProps } from "@/util/types";
 
 const HEX_SIZE = 60;
 const HEX_COLORS: Record<string, string> = {
@@ -8,24 +9,25 @@ const HEX_COLORS: Record<string, string> = {
     wheat: "#ffd700", ore: "#708090", desert: "#f4a460"
 };
 
-// Icons (Same as before)
 const SettlementIcon = ({ x, y, color }: { x: number, y: number, color: string }) => (
     <path d={`M ${x-12} ${y} L ${x-12} ${y+10} L ${x+12} ${y+10} L ${x+12} ${y} L ${x} ${y-15} Z`} 
-        fill={color} stroke="white" strokeWidth="2" style={{ filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.5))" }} />
+        fill={color} stroke="white" strokeWidth="2" style={{ filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.5))", pointerEvents: "none" }} />
 );
 
 const CityIcon = ({ x, y, color }: { x: number, y: number, color: string }) => (
     <path d={`M ${x-15} ${y+10} L ${x+15} ${y+10} L ${x+15} ${y-5} L ${x+5} ${y-5} L ${x+5} ${y-15} L ${x-5} ${y-15} L ${x-5} ${y} L ${x-15} ${y} Z`} 
-        fill={color} stroke="white" strokeWidth="2" style={{ filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.5))" }} />
+        fill={color} stroke="white" strokeWidth="2" style={{ filter: "drop-shadow(0px 2px 2px rgba(0,0,0,0.5))", pointerEvents: "none" }} />
 );
 
-export default function GameBoard({ game }: { game: any }) {
+export default function GameBoard({ game, buildType }: GameBoardProps) {
     if (!game?.board?.hexes) return null;
 
     const myUid = auth.currentUser?.uid;
     const isMyTurn = game.currentTurn === myUid;
-    
     const canBuild = isMyTurn && (game.phase === "SETUP" || game.phase === "MAIN_TURN");
+    const canPlaceRoad = canBuild && buildType === "road";
+    const canPlaceSettlement = canBuild && buildType === "settlement";
+    const canUpgradeToCity = canBuild && buildType === "city";
 
     const hexToPixel = (q: number, r: number) => {
         const x = HEX_SIZE * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r);
@@ -33,6 +35,7 @@ export default function GameBoard({ game }: { game: any }) {
         return { x, y };
     };
 
+    // Calculate corners
     const getHexCorners = (centerX: number, centerY: number) => {
         const corners = [];
         for (let i = 0; i < 6; i++) {
@@ -47,24 +50,47 @@ export default function GameBoard({ game }: { game: any }) {
         return corners;
     };
 
-    const handleVertexClick = (e: any, hexKey: string, vertexId: number) => {
+    // Calculate Edges (Midpoint + Angle)
+    const getHexEdges = (centerX: number, centerY: number) => {
+        const corners = getHexCorners(centerX, centerY);
+        const edges = [];
+        for (let i = 0; i < 6; i++) {
+            const start = corners[i];
+            const end = corners[(i + 1) % 6];
+            
+            // Midpoint
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2;
+            
+            // Angle (degrees)
+            const angle = Math.atan2(end.y - start.y, end.x - start.x) * (180 / Math.PI);
+
+            edges.push({ x: midX, y: midY, angle, id: i });
+        }
+        return edges;
+    };
+
+    const handleBuildClick = (e: any, hexKey: string, id: number, type: BuildType) => {
         e.stopPropagation();
         if (!canBuild) return;
+
+        const locationSuffix = type === "road" ? `e${id}` : `${id}`;
 
         socket.emit("place_structure", {
             roomId: game.id,
             uid: myUid,
-            type: "settlement",
-            location: `${hexKey},${vertexId}`
+            type: type,
+            location: `${hexKey},${locationSuffix}`
         });
     };
 
     return (
-        <Box sx={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center", bgcolor: 'transparent' }}>
+        <Box sx={{ width: "100%", height: "100%", position: "relative", display: "flex", justifyContent: "center", alignItems: "center" }}>
+
             <svg viewBox="-350 -300 700 600" style={{ overflow: "visible", width: "100%", height: "100%" }}>
                 <filter id="shadow"><feDropShadow dx="3" dy="3" stdDeviation="3" floodOpacity="0.5" /></filter>
 
-                {/* HEXES */}
+                {/* 1. HEXES */}
                 {Object.values(game.board.hexes).map((hex: any) => {
                     const { x, y } = hexToPixel(hex.q, hex.r);
                     return (
@@ -75,14 +101,57 @@ export default function GameBoard({ game }: { game: any }) {
                             {hex.number && (
                                 <g>
                                     <circle r="18" fill="white" opacity="0.8" />
-                                    <text y="5" textAnchor="middle" fontWeight="bold" fontSize="14">{hex.number}</text>
+                                    <text y="5" textAnchor="middle" fontWeight="bold" fontSize="14" fill={['6','8'].includes(String(hex.number)) ? 'red' : 'black'}>
+                                        {hex.number}
+                                    </text>
                                 </g>
                             )}
                         </g>
                     );
                 })}
 
-                {/* BUILD SPOTS */}
+                {/* 2. ROADS (Rendered BEFORE vertices so they look 'under' settlements) */}
+                {Object.values(game.board.hexes).map((hex: any) => {
+                    const { x, y } = hexToPixel(hex.q, hex.r);
+                    const edges = getHexEdges(x, y);
+
+                    return edges.map((edge) => {
+                        const locKey = `${hex.id},e${edge.id}`; // Note the 'e' prefix
+                        const existingBuilding = game.board.buildings?.[locKey];
+                        const owner = existingBuilding ? game.players.find((p: any) => p.id === existingBuilding.owner) : null;
+                        const color = owner?.color || "black";
+
+                        return (
+                            <g key={locKey}>
+                                {existingBuilding && existingBuilding.type === 'road' ? (
+                                    // BUILT ROAD
+                                    <rect 
+                                        x={edge.x - 25} y={edge.y - 4} 
+                                        width="50" height="8" 
+                                        fill={color} stroke="white" strokeWidth="1"
+                                        transform={`rotate(${edge.angle}, ${edge.x}, ${edge.y})`}
+                                        style={{ pointerEvents: "none" }}
+                                    />
+                                ) : (
+                                    // GHOST ROAD
+                                    canPlaceRoad && (
+                                        <rect 
+                                            x={edge.x - 25} y={edge.y - 6} 
+                                            width="50" height="12" 
+                                            fill="white" opacity="0"
+                                            className="build-spot"
+                                            transform={`rotate(${edge.angle}, ${edge.x}, ${edge.y})`}
+                                            onClick={(e) => handleBuildClick(e, hex.id, edge.id, "road")}
+                                            style={{ cursor: "pointer", pointerEvents: "all" }}
+                                        />
+                                    )
+                                )}
+                            </g>
+                        );
+                    });
+                })}
+
+                {/* 3. SETTLEMENTS (Vertices) */}
                 {Object.values(game.board.hexes).map((hex: any) => {
                     const { x, y } = hexToPixel(hex.q, hex.r);
                     const corners = getHexCorners(x, y);
@@ -92,23 +161,38 @@ export default function GameBoard({ game }: { game: any }) {
                         const existingBuilding = game.board.buildings?.[locKey];
                         const owner = existingBuilding ? game.players.find((p: any) => p.id === existingBuilding.owner) : null;
                         const color = owner?.color || "black";
+                        const isMyStructure = existingBuilding?.owner === myUid;
 
                         return (
                             <g key={locKey}>
                                 {existingBuilding ? (
-                                    existingBuilding.type === 'city' ? 
-                                        <CityIcon x={corner.x} y={corner.y} color={color} /> :
-                                        <SettlementIcon x={corner.x} y={corner.y} color={color} />
+                                    existingBuilding.type === 'city' ? (
+                                        <CityIcon x={corner.x} y={corner.y} color={color} />
+                                    ) : (
+                                        <>
+                                            <SettlementIcon x={corner.x} y={corner.y} color={color} />
+                                            {canUpgradeToCity && isMyStructure && (
+                                                <circle
+                                                    cx={corner.x}
+                                                    cy={corner.y}
+                                                    r="18"
+                                                    fill="white"
+                                                    opacity="0"
+                                                    className="build-spot"
+                                                    onClick={(e) => handleBuildClick(e, hex.id, corner.id, "city")}
+                                                    style={{ cursor: "pointer", pointerEvents: "all" }}
+                                                />
+                                            )}
+                                        </>
+                                    )
                                 ) : (
-                                    canBuild && (
+                                    // GHOST SETTLEMENT (Only show if buildType is 'settlement')
+                                    canPlaceSettlement && (
                                         <circle 
-                                            cx={corner.x} 
-                                            cy={corner.y} 
-                                            r="12" 
-                                            fill="white" 
-                                            opacity="0" 
+                                            cx={corner.x} cy={corner.y} r="15" 
+                                            fill="white" opacity="0" 
                                             className="build-spot"
-                                            onClick={(e) => handleVertexClick(e, hex.id, corner.id)}
+                                            onClick={(e) => handleBuildClick(e, hex.id, corner.id, "settlement")}
                                             style={{ cursor: "pointer", pointerEvents: "all" }}
                                         />
                                     )
@@ -119,7 +203,7 @@ export default function GameBoard({ game }: { game: any }) {
                 })}
             </svg>
             <style>{`
-                .build-spot:hover { opacity: 0.5; fill: white; stroke: black; }
+                .build-spot:hover { opacity: 0.6 !important; fill: white; stroke: black; }
             `}</style>
         </Box>
     );

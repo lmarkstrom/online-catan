@@ -2,4 +2,11 @@ type Props = {
     game: any;
 };
 
-export type { Props };
+type GameBoardProps = {
+    game: any;
+    buildType: BuildType;
+};
+
+type BuildType = "settlement" | "road" | "city";
+
+export type { Props, BuildType, GameBoardProps };
