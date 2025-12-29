@@ -10,12 +10,20 @@ const {
   areSameRoad
 } = require('../utils/boardUtils');
 const { v4: uuidv4 } = require('uuid');
+import { DEVELOPMENT_CARD_CONFIG, RESOURCE_TYPES, BUILD_COSTS } from '../config/gameConfig';
 
-const RESOURCE_TYPES = ['wood', 'brick', 'sheep', 'wheat', 'ore'];
-const BUILD_COSTS = {
-  road: { wood: 1, brick: 1 },
-  settlement: { wood: 1, brick: 1, sheep: 1, wheat: 1 },
-  city: { wheat: 2, ore: 3 }
+const shuffleArray = (input) => {
+  return [...input].sort(() => Math.random() - 0.5);
+};
+
+const buildDevelopmentDeck = () => {
+  const deck = [];
+  DEVELOPMENT_CARD_CONFIG.forEach((card) => {
+    for (let i = 0; i < card.count; i++) {
+      deck.push({ key: card.key, label: card.label, handler: card.handler, description: card.description });
+    }
+  });
+  return shuffleArray(deck);
 };
 
 const normalizePlayerResources = (player) => {
@@ -35,6 +43,29 @@ const deductResources = (player, cost) => {
   Object.entries(cost).forEach(([res, amount]) => {
     player.resources[res] -= amount;
   });
+};
+
+const DEVELOPMENT_CARD_HANDLERS = {
+  knight: ({ game, player }) => {
+    player.knightsPlayed = (player.knightsPlayed || 0) + 1;
+    game.logs.push(`${player.name} played a Knight card.`);
+  },
+  resource: ({ game, player, payload }) => {
+    const chosenResource = payload?.resource;
+    if (!chosenResource || !RESOURCE_TYPES.includes(chosenResource)) {
+      throw new Error('Select a valid resource to gain.');
+    }
+    normalizePlayerResources(player);
+    player.resources[chosenResource] += 1;
+    game.logs.push(`${player.name} gained 1 ${chosenResource} from a Resource card.`);
+  }
+};
+
+const drawDevelopmentCard = (game) => {
+  if (!game.devCardDeck || game.devCardDeck.length === 0) {
+    throw new Error('No development cards remaining.');
+  }
+  return game.devCardDeck.pop();
 };
 
 const validateSettlementPlacement = (game, uid, location, isSetupPhase) => {
@@ -99,10 +130,14 @@ const GameService = {
       hostId: hostId,
       status: 'WAITING',
       players: [{ 
-          id: hostId, name: hostName, color: 'red', ready: false, 
-          resources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 } 
+        id: hostId, name: hostName, color: 'red', ready: false, 
+        resources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
+        devCards: [],
+        knightsPlayed: 0
       }],
       board: {}, 
+      devCardDeck: [],
+      devCardDiscard: [],
       turnIndex: 0,
       setupTurnIndex: 0,
       logs: [`Game created by ${hostName}`]
@@ -135,7 +170,9 @@ const GameService = {
       name: playerName,
       color: colors[game.players.length],
       ready: false,
-      resources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 }
+      resources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
+      devCards: [],
+      knightsPlayed: 0
     };
 
     game.players.push(newPlayer);
@@ -155,6 +192,8 @@ const GameService = {
 
     game.status = 'PLAYING';
     game.board = generateBoard();
+    game.devCardDeck = buildDevelopmentDeck();
+    game.devCardDiscard = [];
     
     game.phase = "SETUP"; 
     game.turnOrder = game.players.map(p => p.id); // e.g., [A, B, C, D]
@@ -248,6 +287,69 @@ const GameService = {
     return game;
   },
 
+  buyDevelopmentCard: (roomId, uid) => {
+    const game = store.getGame(roomId);
+    if (!game) throw new Error("Game not found");
+    if (game.phase !== "MAIN_TURN") {
+      throw new Error("You can only buy development cards during your main turn.");
+    }
+
+    const player = game.players.find((p) => p.id === uid);
+    if (!player) throw new Error("Player not found in game");
+    normalizePlayerResources(player);
+
+    if (!hasResources(player, DEVELOPMENT_CARD_COST)) {
+      throw new Error("Not enough resources to buy a development card.");
+    }
+
+    const drawnTemplate = drawDevelopmentCard(game);
+    const cardInstance = {
+      id: uuidv4(),
+      key: drawnTemplate.key,
+      label: drawnTemplate.label,
+      handler: drawnTemplate.handler
+    };
+
+    player.devCards = player.devCards || [];
+    player.devCards.push(cardInstance);
+    deductResources(player, DEVELOPMENT_CARD_COST);
+    game.logs.push(`${player.name} bought a development card.`);
+
+    store.saveGame(roomId, game);
+    return game;
+  },
+
+  playDevelopmentCard: (roomId, uid, cardId, payload = {}) => {
+    const game = store.getGame(roomId);
+    if (!game) throw new Error("Game not found");
+    if (game.phase === "SETUP") {
+      throw new Error("You cannot play development cards during setup.");
+    }
+
+    const player = game.players.find((p) => p.id === uid);
+    if (!player) throw new Error("Player not found in game");
+
+    const hand = player.devCards || [];
+    const cardIndex = hand.findIndex((card) => card.id === cardId);
+    if (cardIndex === -1) {
+      throw new Error("Development card not found in hand.");
+    }
+
+    const card = hand[cardIndex];
+    const handler = DEVELOPMENT_CARD_HANDLERS[card.handler];
+    if (!handler) {
+      throw new Error("No handler registered for this card.");
+    }
+
+    handler({ game, player }, payload);
+    hand.splice(cardIndex, 1);
+    game.devCardDiscard = game.devCardDiscard || [];
+    game.devCardDiscard.push(card);
+
+    store.saveGame(roomId, game);
+    return game;
+  },
+
   rollDice: (roomId, uid) => {
     const game = store.getGame(roomId);
     if (game.currentTurn !== uid) throw new Error("Not your turn");
@@ -295,9 +397,8 @@ const GameService = {
         game.setupTurnIndex++;
         const maxSetupTurns = N * 2; 
 
-        // LOGIC FIX: Check if we are done
         if (game.setupTurnIndex >= maxSetupTurns) {
-            game.phase = "ROLL_DICE"; // <--- UNLOCKS ROLL BUTTON
+            game.phase = "ROLL_DICE"; 
             game.turnIndex = 0;
             game.currentTurn = game.turnOrder[0];
             game.logs.push("Setup complete! First turn begins.");

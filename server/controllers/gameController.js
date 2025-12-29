@@ -87,6 +87,24 @@ module.exports = (io, socket) => {
     }
   };
 
+  const buyDevelopmentCard = ({ roomId, uid }) => {
+    try {
+      const updatedGame = GameService.buyDevelopmentCard(roomId, uid);
+      io.to(roomId).emit("game_updated", updatedGame);
+    } catch (err) {
+      socket.emit("error", { message: err.message });
+    }
+  };
+
+  const playDevelopmentCard = ({ roomId, uid, cardId, payload }) => {
+    try {
+      const updatedGame = GameService.playDevelopmentCard(roomId, uid, cardId, payload);
+      io.to(roomId).emit("game_updated", updatedGame);
+    } catch (err) {
+      socket.emit("error", { message: err.message });
+    }
+  };
+
   // Register Listeners
   socket.on("create_lobby", createLobby);
   socket.on("join_lobby", joinLobby);
@@ -94,4 +112,6 @@ module.exports = (io, socket) => {
   socket.on("place_structure", placeStructure); 
   socket.on("roll_dice", rollDice);             
   socket.on("end_turn", endTurn);               
+  socket.on("buy_dev_card", buyDevelopmentCard);
+  socket.on("play_dev_card", playDevelopmentCard);
 };

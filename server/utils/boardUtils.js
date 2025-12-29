@@ -1,26 +1,6 @@
-const RESOURCES = [
-  'wood', 'wood', 'wood', 'wood',
-  'brick', 'brick', 'brick',
-  'sheep', 'sheep', 'sheep', 'sheep',
-  'wheat', 'wheat', 'wheat', 'wheat',
-  'ore', 'ore', 'ore',
-  'desert'
-];
-
-const NUMBER_TOKENS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12];
-
-const HEX_COORDINATES = [
-    { q: 0, r: -2 }, { q: 1, r: -2 }, { q: 2, r: -2 },
-    { q: -1, r: -1 }, { q: 0, r: -1 }, { q: 1, r: -1 }, { q: 2, r: -1 },
-    { q: -2, r: 0 }, { q: -1, r: 0 }, { q: 0, r: 0 }, { q: 1, r: 0 }, { q: 2, r: 0 },
-    { q: -2, r: 1 }, { q: -1, r: 1 }, { q: 0, r: 1 }, { q: 1, r: 1 },
-    { q: -2, r: 2 }, { q: -1, r: 2 }, { q: 0, r: 2 }
-];
+import { RESOURCES, NUMBER_TOKENS, HEX_COORDINATES, HEX_SIZE } from "./constants";
 
 const shuffle = (array) => array.sort(() => Math.random() - 0.5);
-
-// --- GEOMETRY HELPERS ---
-const HEX_SIZE = 1.0; 
 
 const hexToPixel = (q, r) => {
   const x = HEX_SIZE * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r);

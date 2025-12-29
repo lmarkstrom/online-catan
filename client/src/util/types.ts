@@ -9,4 +9,10 @@ type GameBoardProps = {
 
 type BuildType = "settlement" | "road" | "city";
 
-export type { Props, BuildType, GameBoardProps };
+type DevCard = {
+    id: string;
+    key: string;
+    label: string;
+};
+
+export type { Props, BuildType, GameBoardProps, DevCard };

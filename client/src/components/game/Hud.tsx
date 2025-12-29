@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { socket } from "@/lib/sockets";
 import { auth } from "@/lib/firebase";
+import type { SelectChangeEvent } from "@mui/material";
 import {
   Box,
   Container,
@@ -12,16 +14,27 @@ import {
   Fab,
   Chip,
   Fade,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import { 
   Casino, 
   Terrain, 
   Home, 
   Apartment, 
-  SkipNext
+  SkipNext,
+  Style,
+  ShoppingBag
 } from "@mui/icons-material";
 import { resourceColors } from "@/util/constants";
-import type { Props, BuildType } from "@/util/types";
+import type { Props, BuildType, DevCard } from "@/util/types";
 
 type HudProps = Props & {
   buildType: BuildType;
@@ -31,6 +44,10 @@ type HudProps = Props & {
 export default function Hud(props: HudProps) {
   const { id } = useParams();
   const { game, buildType, onChangeBuildType } = props;
+  const resourceKeys = Object.keys(resourceColors);
+  const [resourceChoice, setResourceChoice] = useState<string>(resourceKeys[0] || "wood");
+  const [resourceDialogOpen, setResourceDialogOpen] = useState(false);
+  const [pendingCard, setPendingCard] = useState<DevCard | null>(null);
 
   const handleRollDice = () => {
     socket.emit("roll_dice", { 
@@ -45,11 +62,18 @@ export default function Hud(props: HudProps) {
         uid: auth.currentUser?.uid 
     });
   };
-  // --- FIX END ---
 
   const isMyTurn = game.currentTurn === auth.currentUser?.uid;
   const canBuild = isMyTurn && (game.phase === "SETUP" || game.phase === "MAIN_TURN");
   const me = game.players.find((p: any) => p.id === auth.currentUser?.uid) || {};
+  const myCards: DevCard[] = me.devCards || [];
+  const deckRemaining: number = game.devCardDeck?.length ?? 0;
+  const devCardCost = { sheep: 1, wheat: 1, ore: 1 };
+  const hasDevCardResources = Object.entries(devCardCost).every(
+    ([res, amount]) => (me.resources?.[res] || 0) >= amount
+  );
+  const canBuyDevCard = isMyTurn && game.phase === "MAIN_TURN" && deckRemaining > 0 && hasDevCardResources;
+  const canPlayDevCard = isMyTurn && game.phase !== "SETUP";
   const currentTurnPlayer = game.players.find((p: any) => p.id === game.currentTurn);
   const buildOptions: Array<{ type: BuildType; label: string; icon: JSX.Element; activeColor: string; hoverBg: string }> = [
     { type: "road", label: "Build Road", icon: <Terrain />, activeColor: "#38bdf8", hoverBg: "rgba(56, 189, 248, 0.15)" },
@@ -60,6 +84,44 @@ export default function Hud(props: HudProps) {
   const handleSelectBuild = (type: BuildType) => {
     if (!canBuild) return;
     onChangeBuildType(type);
+  };
+
+  const handleBuyCard = () => {
+    if (!canBuyDevCard) return;
+    socket.emit("buy_dev_card", {
+      roomId: id,
+      uid: auth.currentUser?.uid
+    });
+  };
+
+  const emitPlayCard = (card: DevCard, payload?: Record<string, any>) => {
+    socket.emit("play_dev_card", {
+      roomId: id,
+      uid: auth.currentUser?.uid,
+      cardId: card.id,
+      payload
+    });
+  };
+
+  const handlePlayCard = (card: DevCard) => {
+    if (!canPlayDevCard) return;
+    if (card.key === "resource") {
+      setPendingCard(card);
+      setResourceDialogOpen(true);
+      return;
+    }
+    emitPlayCard(card);
+  };
+
+  const closeResourceDialog = () => {
+    setResourceDialogOpen(false);
+    setPendingCard(null);
+  };
+
+  const handleConfirmResourceCard = () => {
+    if (!pendingCard) return;
+    emitPlayCard(pendingCard, { resource: resourceChoice });
+    closeResourceDialog();
   };
 
   return (
@@ -86,7 +148,7 @@ export default function Hud(props: HudProps) {
           >
             {/* LEFT: RESOURCE CARDS */}
             <Stack direction="row" spacing={1.5} sx={{ overflowX: "auto", py: 1 }}>
-              {Object.keys(resourceColors).map((res) => (
+              {resourceKeys.map((res) => (
                 <Tooltip key={res} title={res.charAt(0).toUpperCase() + res.slice(1)}>
                   <Paper
                     elevation={4}
@@ -223,10 +285,116 @@ export default function Hud(props: HudProps) {
                 </Fab>
               </Stack>
             </Stack>
+          </Stack>
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            spacing={3}
+            sx={{ mt: 4 }}
+          >
+            <Paper
+              sx={{
+                flex: 1,
+                p: 2,
+                bgcolor: "rgba(255,255,255,0.04)",
+                borderRadius: 3,
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Style fontSize="small" sx={{ color: "#fcd34d" }} />
+                <Typography variant="subtitle2" sx={{ letterSpacing: 1, color: "rgba(255,255,255,0.8)" }}>
+                  DEVELOPMENT DECK
+                </Typography>
+              </Stack>
+              <Typography variant="h3" sx={{ color: "white", fontWeight: 800 }}>
+                {deckRemaining}
+              </Typography>
+              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.6)", mb: 2 }}>
+                {deckRemaining === 1 ? "card remaining" : "cards remaining"}
+              </Typography>
+              <Button
+                variant="contained"
+                color="secondary"
+                startIcon={<ShoppingBag />}
+                onClick={handleBuyCard}
+                disabled={!canBuyDevCard}
+                sx={{ fontWeight: 700 }}
+              >
+                Buy Card
+              </Button>
+              <Typography variant="caption" sx={{ display: "block", mt: 1, color: "rgba(255,255,255,0.6)" }}>
+                Cost: Sheep + Wheat + Ore
+              </Typography>
+            </Paper>
 
+            <Paper
+              sx={{
+                flex: 2,
+                p: 2,
+                bgcolor: "rgba(255,255,255,0.04)",
+                borderRadius: 3,
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Style fontSize="small" sx={{ color: "#38bdf8" }} />
+                <Typography variant="subtitle2" sx={{ letterSpacing: 1, color: "rgba(255,255,255,0.8)" }}>
+                  YOUR CARDS
+                </Typography>
+              </Stack>
+              {myCards.length ? (
+                <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 2 }}>
+                  {myCards.map((card) => (
+                    <Tooltip key={card.id} title={canPlayDevCard ? "Play card" : "Wait for your turn"}>
+                      <span>
+                        <Chip
+                          icon={<Style />}
+                          label={card.label}
+                          color="primary"
+                          onClick={() => handlePlayCard(card)}
+                          disabled={!canPlayDevCard}
+                          sx={{ color: "white", fontWeight: 600 }}
+                        />
+                      </span>
+                    </Tooltip>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" sx={{ mt: 2, color: "rgba(255,255,255,0.6)" }}>
+                  You have no development cards yet.
+                </Typography>
+              )}
+            </Paper>
           </Stack>
         </Container>
       </Paper>
+
+      <Dialog open={resourceDialogOpen} onClose={closeResourceDialog} fullWidth maxWidth="xs">
+        <DialogTitle>Choose a resource</DialogTitle>
+        <DialogContent>
+          <FormControl fullWidth sx={{ mt: 1 }}>
+            <InputLabel id="resource-select-label">Resource</InputLabel>
+            <Select
+              labelId="resource-select-label"
+              value={resourceChoice}
+              label="Resource"
+              onChange={(event: SelectChangeEvent<string>) => setResourceChoice(event.target.value as string)}
+            >
+              {resourceKeys.map((res) => (
+                <MenuItem key={res} value={res}>
+                  {res.charAt(0).toUpperCase() + res.slice(1)}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeResourceDialog}>Cancel</Button>
+          <Button variant="contained" onClick={handleConfirmResourceCard} disabled={!pendingCard}>
+            Gain Resource
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
